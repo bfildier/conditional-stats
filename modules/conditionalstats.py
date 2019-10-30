@@ -6,7 +6,7 @@ single variable, choosing the bin type (linear, logarithmic, inverse-logarithmic
 ...).
 """
 import numpy as np
-from math import log10,ceil,floor
+from math import log10,ceil,floor,exp
 
 class WrongArgument(Exception):
     pass
@@ -62,12 +62,31 @@ class EmptyDistribution:
         else:
 
             raise WrongArgument("ERROR: unknown bintype")
+    
+    def __str__(self):
+        """Override string function to print attributes
+        """
+        # method_names = []
+        # str_out = '-- Attributes --'
+        str_out = ''
+        for a in dir(self):
+            if '__' not in a:
+                a_str = str(getattr(self,a))
+                if 'method' not in a_str:
+                    str_out = str_out+("%s : %s\n"%(a,a_str))
+        #         else:
+        #             method_names.append(a)
+        # print('-- Methods --')
+        # for m in method_names:
+        #     print(m)
+        return str_out
+
 
 class Distribution(EmptyDistribution):
     """Documentation for class Distribution
     """
 
-    def __init__(self,name,bintype='linear',nbpd=10,nppb=4,nlb=50,nlr=100,\
+    def __init__(self,name='',bintype='linear',nbpd=10,nppb=4,nlb=50,nlr=100,\
         fill_last_decade=False):
 
         """Constructor for class Distribution.
@@ -81,7 +100,7 @@ class Distribution(EmptyDistribution):
 
         EmptyDistribution.__init__(self,bintype,nbpd,nppb,nlb,nlr,fill_last_decade)
         self.name = name
-        self.n_pts = 0
+        self.size = 0
         self.vmin = None
         self.vmax = None
         self.ranks = None
@@ -89,14 +108,18 @@ class Distribution(EmptyDistribution):
         self.bins = None
         self.density = None
 
+    def __str__(self):
+        return super().__str__()
+
     def setSampleSize(self,sample):
 
         if sample.size == 0:
             raise EmptyDataset("")
         else:
-            self.n_pts = sample.size
+            self.size = sample.size
 
-    def setVminVmax(self,sample=None,vmin=None,vmax=None,minmode='positive'):
+    def setVminVmax(self,sample=None,vmin=None,vmax=None,minmode='positive',\
+        overwrite=False):
 
         """Compute and set minimum and maximum values
         Arguments:
@@ -112,9 +135,9 @@ class Distribution(EmptyDistribution):
         if vmax is None:
             vmax = np.nanmax(sample)
             
-        if self.vmin is None:
+        if self.vmin is None or overwrite:
             self.vmin = vmin
-        if self.vmax is None:
+        if self.vmax is None or overwrite:
             self.vmax = vmax
 
     def getInvLogRanks(self):
@@ -128,10 +151,10 @@ class Distribution(EmptyDistribution):
             - ranks: 1D numpy.array of floats"""
 
         # k indexes bins
-        n_decades = log10(self.n_pts/self.nppb) 		# Maximum number of decades
+        n_decades = log10(self.size/self.nppb) 		# Maximum number of decades
         dk = 1/self.nbpd
         if self.fill_last_decade:
-            k_max = ceil(n_decades)				 	# Maximum bin index
+            k_max = floor(n_decades)				 	# Maximum bin index
         else:
             k_max = int(n_decades*self.nbpd)*dk # Maximum bin index
         scale_invlog = np.arange(0,k_max+dk,dk)
@@ -190,7 +213,7 @@ class Distribution(EmptyDistribution):
             - bins
         """
         
-        self.n_pts = sample.size
+        self.size = sample.size
         # First compute invlog ranks including its edge values
         self.getInvLogRanks()
         # Then compute final stats
@@ -227,10 +250,17 @@ class Distribution(EmptyDistribution):
         self.setVminVmax(sample,vmin,vmax,minmode)
         kmin = floor(log10(self.vmin))
         kmax = ceil(log10(self.vmax))
-        dk = 1/self.nbpd
-        exps = np.arange(kmin,kmax+dk,dk)
-        self.bins = np.power(10.,exps)
+        # dk = 1/self.nbpd
+        # exps = np.arange(kmin,kmax+dk,dk)
+        # self.bins = np.power(10.,exps)
+        # self.percentiles = np.convolve(self.bins,[0.5,0.5],mode='valid')
+    
+        self.bins = np.logspace(kmin,kmax,(kmax-kmin)*self.nbpd)
         self.percentiles = np.convolve(self.bins,[0.5,0.5],mode='valid')
+        # exp_bins = np.arange(kmin,kmax+dk,dk)
+        # exp_centers = np.convolve(exp_bins,[0.5,0.5],mode='valid')
+        # self.bins = np.power(10.,exp_bins)
+        # self.percentiles = np.power(10.,exp_centers)
 
     def defineLinearBins(self,sample,vmin=None,vmax=None,minmode='positive'):
 
@@ -244,7 +274,7 @@ class Distribution(EmptyDistribution):
         """
 
         self.setVminVmax(sample,vmin,vmax,minmode)
-        self.bins = np.linspace(vmin,vmax,self.nlb)
+        self.bins = np.linspace(self.vmin,self.vmax,self.nlb)
         self.percentiles = np.convolve(self.bins,[0.5,0.5],mode='valid')
 
     def computePercentileRanksFromBins(self,sample):
@@ -255,7 +285,7 @@ class Distribution(EmptyDistribution):
         Computes:
             - ranks: 1D numpy.ndarray"""
         
-        self.ranks = 100*np.array(list(map(lambda x:(sample < x).sum()/self.n_pts, \
+        self.ranks = 100*np.array(list(map(lambda x:(sample < x).sum()/self.size, \
             self.percentiles)))
 
     def ranksPercentilesAndBins(self,sample,vmin=None,vmax=None,minmode='positive',\
@@ -294,7 +324,7 @@ class Distribution(EmptyDistribution):
 
             raise WrongArgument("ERROR: unknown bintype")
 
-    def computeDistribution(self,sample,vmin=None,vmax=None,minmode='positive'):
+    def computeDistribution(self,sample,vmin=None,vmax=None,minmode=None):
 
         """Compute ranks, bins, percentiles and corresponding probability densities.
         Arguments:
@@ -309,4 +339,16 @@ class Distribution(EmptyDistribution):
         self.density = density
 
 
-            
+class ConditionalDistribution():
+"""Class ConditionalDistribution.
+
+Stores conditional mean and variance in bins of a reference distribution.
+"""
+
+    def __init__(self,name='',refDistribution=None):
+        """Contructor
+        """
+
+        self.name = name
+        self.referenceDistribution = refDistribution
+        

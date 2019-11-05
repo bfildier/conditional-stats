@@ -107,6 +107,7 @@ class Distribution(EmptyDistribution):
         self.percentiles = None
         self.bins = None
         self.density = None
+        self.bin_locations_stored = False
 
     def __str__(self):
         return super().__str__()
@@ -194,7 +195,6 @@ class Distribution(EmptyDistribution):
         if crop:
             centers = centers[1:-1]
             self.ranks = self.ranks[1:-1]
-            self.nbins = self.nbins-1
         else:
             temp = breaks.copy()
             breaks = np.array([np.nan]*(temp.size+2))
@@ -204,6 +204,7 @@ class Distribution(EmptyDistribution):
 
         self.percentiles = centers
         self.bins = breaks
+        self.nbins = self.bins.size - 1 # ()'bins' is actually bin edges)
 
     def definePercentilesOnInvLogQ(self,sample):
 
@@ -269,9 +270,9 @@ class Distribution(EmptyDistribution):
         """
 
         self.setVminVmax(sample,vmin,vmax,minmode)
-        self.bins = np.linspace(self.vmin,self.vmax,self.nlb)
+        self.bins = np.linspace(self.vmin,self.vmax,self.nlb+1)
         self.percentiles = np.convolve(self.bins,[0.5,0.5],mode='valid')
-        self.nbins = self.nlb
+        self.nbins = self.percentiles.size
 
     def computePercentileRanksFromBins(self,sample):
 
@@ -367,7 +368,32 @@ class Distribution(EmptyDistribution):
         # raise WrongArgument("no percentile or rank is provided in binIndex")
         return None
 
-    def storeSamplePoints(self,sample,sizemax=50):
+    def formatDimensions(self,sample):
+        """Reshape the input data, test the validity and returns the dimensions
+        and formatted data.
+
+        Arguments:
+        - sample: if is3D, format it in shape (Nz,Ncolumns), otherwise (Ncolumns,)
+        Controls if it matches the data used for the control distribution. If
+        not, aborts.
+        """
+
+        # Get shape
+        sshape = sample.shape
+        # Initialize default output
+        sample_out = sample
+        # Get dimensions and adjust output shape
+        if len(sshape) > 1: # reshape
+            sample_out = np.reshape(sample,np.prod(sshape))
+        Npoints, = sample_out.shape
+        
+        # Test if sample size is correct to access sample points
+        if Npoints != self.size:
+            raise WrongArgument("Error: used different sample size")
+
+        return sample_out
+
+    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
 
         """Find indices of bins in the sample data, to go back and fetch
         """
@@ -375,15 +401,21 @@ class Distribution(EmptyDistribution):
         if self.bin_locations_stored:
             pass
 
+        print("Finding bin locations...")
+        sample = self.formatDimensions(sample)
+
         # Else initalize and find bin locations
         self.bin_locations = [[] for _ in range(self.nbins)]
         self.bin_sample_size = [0 for _ in range(self.nbins)]
 
         # Look at all points, in random order
         indices = list(range(self.size))
-        random.shuffle(indices)
+        np.random.shuffle(indices)
 
-        for i in indices:
+        bins_full = []
+        for i_ind in range(len(indices)):
+
+            i = indices[i_ind]
 
             # Find corresponding bin
             i_bin = self.binIndex(percentile=sample[i])
@@ -392,15 +424,27 @@ class Distribution(EmptyDistribution):
             if i_bin is not None:
                 
                 # Keep count
-                self.bin_sample_size[i] += 1
+                self.bin_sample_size[i_bin] += 1
                 # Store only if there is still room in stored locations list
                 if len(self.bin_locations[i_bin]) < sizemax:
                     self.bin_locations[i_bin].append(i)
+                elif i_bin not in bins_full:
+                    bins_full.append(i_bin)
+                    bins_full.sort()
+                    if verbose:
+                        print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
 
+                
+                
+        
+        print()
+
+        # If reach this point, everything should have worked smoothly, so:
+        self.bin_locations_stored = True
 
 
 class ConditionalDistribution():
-    """Class ConditionalDistribution.
+    """Documentation for class ConditionalDistribution.
 
     Stores conditional mean and variance in bins of a reference distribution.
     """
@@ -422,10 +466,86 @@ class ConditionalDistribution():
         self.cond_var = None
         
     def computeMean(self,sample):
-        pass
+        """Computes the (full) mean of the input data
+        """
 
-    def computeConditionalMean(self,sample):
-        pass
+        self.mean = np.nanmean(sample)
 
-    def computeConditionalVar(self,sample):
-        pass
+    def formatDimensions(self,sample):
+        """Reshape the input data, test the validity and returns the dimensions
+        and formatted data.
+
+        Arguments:
+        - sample: if is3D, format it in shape (Nz,Ncolumns), otherwise (Ncolumns,)
+        Controls if it matches the data used for the control distribution. If
+        not, aborts.
+        """
+
+        # Get shape
+        sshape = sample.shape
+        # Initialize default output
+        sample_out = sample
+        # Get dimensions and adjust output shape
+        if self.is3D:
+            if len(sshape) > 2: # reshape
+                sample_out = np.reshape(sample,(sshape[0],np.prod(sshape[1:])))
+            Nz,Npoints = sample_out.shape
+        else:
+            if len(sshape) > 1: # reshape
+                sample_out = np.reshape(sample,np.prod(sshape))
+            Npoints, = sample_out.shape
+            Nz = None
+        
+        # Test if sample size is correct to access sample points
+        if Npoints != self.on.size:
+            raise WrongArgument("Error: sample size is different than that of the reference variable, so the masks might differ")
+
+        return Nz, sample_out
+
+    def computeConditionalMeanAndVariance(self,sample,verbose=False):
+        """Computes mean and variance of input data at each percentile of 
+        reference variable (in bins self.on.bins).
+
+        Arguments:
+        - sample: if is3D, must be in format (Nz,Ncolumns), otherwise (Ncolumns,)
+        If not, format it using method formatDimensions.
+        """
+
+        # Abort if sample points for each percentile has not been computed yet
+        if self.on is None or not self.on.bin_locations_stored:
+            raise EmptyDataset("Abort: must calculate bin locations of reference distribution first")
+
+        # format dataset and test validity of input dataset
+        Nz, sample = self.formatDimensions(sample)
+
+        # Initialize storing arrays
+        if self.is3D:
+            self.cond_mean = np.nan*np.zeros((Nz,self.on.nbins))
+            self.cond_var = np.nan*np.zeros((Nz,self.on.nbins))
+        else:
+            self.cond_mean = np.nan*np.zeros((self.on.nbins,))
+            self.cond_var = np.nan*np.zeros((self.on.nbins,))
+
+        # Access sample points to calculate conditional stats
+        # automate
+        def apply2vector(fun,vector):
+            out = np.nan*np.zeros(self.on.nbins)
+            for i_b in range(self.on.nbins): # loop over bins
+                subsample = np.take(vector,self.on.bin_locations[i_b])
+                if subsample.size == 0:
+                    if verbose:
+                        print('passing bin %d, subsample of size %d'%(i_b,subsample.size))
+                    # pass
+                else:
+                    if verbose:
+                        print("bin %d, result:%2.2f"%(i_b,fun(subsample)))
+                    out[i_b] = fun(subsample)
+            return out
+        # compute
+        if self.is3D:
+            for i_z in range(Nz): # loop over heights
+                self.cond_mean[i_z] = apply2vector(np.nanmean,np.squeeze(sample[i_z]))
+                self.cond_var[i_z] = apply2vector(np.nanvar,np.squeeze(sample[i_z]))
+        else:
+            self.cond_mean = apply2vector(np.nanmean,sample)
+            self.cond_var = apply2vector(np.nanvar,sample)

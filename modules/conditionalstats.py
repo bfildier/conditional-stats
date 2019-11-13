@@ -401,7 +401,9 @@ class Distribution(EmptyDistribution):
         if self.bin_locations_stored:
             pass
 
-        print("Finding bin locations...")
+        if verbose:
+            print("Finding bin locations...")
+
         sample = self.formatDimensions(sample)
 
         # Else initalize and find bin locations
@@ -433,9 +435,6 @@ class Distribution(EmptyDistribution):
                     bins_full.sort()
                     if verbose:
                         print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
-
-                
-                
         
         print()
 
@@ -549,3 +548,13 @@ class ConditionalDistribution():
         else:
             self.cond_mean = apply2vector(np.nanmean,sample)
             self.cond_var = apply2vector(np.nanvar,sample)
+
+        self.cond_std = np.sqrt(self.cond_var)
+
+class DistributionOverTime():
+
+    pass
+
+class ConditionalDistributionOverTime():
+
+    pass

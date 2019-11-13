@@ -448,18 +448,18 @@ class ConditionalDistribution():
     Stores conditional mean and variance in bins of a reference distribution.
     """
 
-    def __init__(self,name='',is3D=False,refDistribution=None):
+    def __init__(self,name='',is3D=False,on=None):
         """Contructor
         
         Arguments:
         - name
         - is3D: boolean, if variable is defined in the vertical dimension
-        - refDistribution: Object Distribution containing stats of reference variable
+        - on: Object Distribution containing stats of reference variable
         """
 
         self.name = name
         self.is3D = is3D
-        self.on = refDistribution
+        self.on = on
         self.mean = None
         self.cond_mean = None
         self.cond_var = None
@@ -552,9 +552,97 @@ class ConditionalDistribution():
         self.cond_std = np.sqrt(self.cond_var)
 
 class DistributionOverTime():
+    """Time evolution of an object of class Distribution.
+    """
 
-    pass
+    def __init__(self,name='',time=[],*args):
+        """Constructor of class DistributionOverTime
+
+        Arguments:
+        - *args: see input parameters of constructor Distribution.__init__
+        """
+
+        self.name = name
+        self.time = time
+        self.nt = len(self.time)
+        self.distributions = [Distribution(name,*args) for i in range(self.nt)]
+
+    def computeDistributions(self,sample,*args):
+        """Fills up the distribution of timeVar 
+
+        Arguments:
+        - sample: np.array of dimensions (nt,...)
+        - *args: see input parameters in method Distribution.computeDistribution
+        """
+
+        # Test dimensions
+        sshape = sample.shape
+        if sshape[0] != self.nt:
+            raise WrongArgument('ERROR: input sample does not have the correct'+\
+            ' time dimension')
+
+        # Compute all distributions over time
+        for i_t in range(self.nt):
+
+            self.distributions[i_t].computeDistribution(sample[i_t],*args)
+
+
 
 class ConditionalDistributionOverTime():
+    """Time evolution of an object of class ConditionalDistribution.
+    """
 
-    pass
+    def __init__(self,name='',time=[],is3D=False,on=None):
+        """Constructor of class ConditionalDistributionOverTime
+
+        Arguments:
+        - *args: see input parameters of constructor ConditionalDistribution.__init__
+        """
+
+        self.name = name
+        self.time = time
+        self.nt = len(self.time)
+        self.cond_distributions = []
+
+        # Initializes all reference distributions
+        for on_i in on.distributions:
+            self.cond_distributions.append(ConditionalDistribution(name,is3D=is3D,on=on_i))
+        
+    def testInput(self,sample):
+        """Test that time dimension is matching first dimension of imput sample
+        """
+        sshape = sample.shape
+        if sshape[0] != self.nt:
+            raise WrongArgument('ERROR: input sample does not have the correct'+\
+            ' time dimension')
+            
+    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
+        """Find indices of bins in the sample data, to go back and fetch
+        """
+
+        # Test dimensions
+        self.testInput(sample)
+
+        # Compute bin locations if not known already
+        for i_t in range(self.nt):
+            if verbose:
+                print('-- time slice #%d'%i_t)
+
+            self.cond_distributions[i_t].on.storeSamplePoints(sample=sample[i_t],sizemax=sizemax,verbose=verbose)
+
+    def computeConditionalStatsOverTime(self,sample,*args):
+        """Fills up the distribution of timeVar 
+
+        Arguments:
+        - sample: np.array of dimensions (nt,...)
+        - *args: see input parameters in method ConditionalDistribution.computeConditionalMeanAndVariance
+        """
+
+        # Test dimensions
+        self.testInput(sample)
+
+        # Compute all distributions over time
+        for i_t in range(self.nt):
+
+            self.cond_distributions[i_t].computeConditionalMeanAndVariance(sample[i_t],*args)
+        

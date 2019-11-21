@@ -395,7 +395,7 @@ class Distribution(EmptyDistribution):
 
     def storeSamplePoints(self,sample,sizemax=50,verbose=False):
 
-        """Find indices of bins in the sample data, to go back and fetch
+        """Find indices of bins in the sample data, to go back and fetch later
         """
 
         if self.bin_locations_stored:
@@ -436,11 +436,11 @@ class Distribution(EmptyDistribution):
                     if verbose:
                         print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
         
-        print()
+        if verbose:
+            print()
 
         # If reach this point, everything should have worked smoothly, so:
         self.bin_locations_stored = True
-
 
 class ConditionalDistribution():
     """Documentation for class ConditionalDistribution.
@@ -555,17 +555,26 @@ class DistributionOverTime():
     """Time evolution of an object of class Distribution.
     """
 
-    def __init__(self,name='',time=[],*args):
+    def __init__(self,name='',time=[],**kwargs):
         """Constructor of class DistributionOverTime
 
         Arguments:
         - *args: see input parameters of constructor Distribution.__init__
         """
-
+        # for key, value in kwargs.items(): 
+        #     print ("%s == %s" %(key, value))
         self.name = name
         self.time = time
         self.nt = len(self.time)
-        self.distributions = [Distribution(name,*args) for i in range(self.nt)]
+        self.distributions = [Distribution(name,**kwargs) for i in range(self.nt)]
+
+    def testInput(self,sample):
+        """Test that time dimension is matching first dimension of imput sample
+        """
+        sshape = sample.shape
+        if sshape[0] != self.nt:
+            raise WrongArgument('ERROR: input sample does not have the correct'+\
+            ' time dimension')
 
     def computeDistributions(self,sample,*args):
         """Fills up the distribution of timeVar 
@@ -576,17 +585,26 @@ class DistributionOverTime():
         """
 
         # Test dimensions
-        sshape = sample.shape
-        if sshape[0] != self.nt:
-            raise WrongArgument('ERROR: input sample does not have the correct'+\
-            ' time dimension')
+        self.testInput(sample)
 
         # Compute all distributions over time
         for i_t in range(self.nt):
 
             self.distributions[i_t].computeDistribution(sample[i_t],*args)
 
+    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
+        """Find indices of bins in the sample data, to go back and fetch
+        """
 
+        # Test dimensions
+        self.testInput(sample)
+
+        # Compute bin locations if not known already
+        for i_t in range(self.nt):
+            if verbose:
+                print('-- time slice #%d'%i_t)
+
+            self.distributions[i_t].storeSamplePoints(sample=sample[i_t],sizemax=sizemax,verbose=verbose)
 
 class ConditionalDistributionOverTime():
     """Time evolution of an object of class ConditionalDistribution.
@@ -618,6 +636,10 @@ class ConditionalDistributionOverTime():
             
     def storeSamplePoints(self,sample,sizemax=50,verbose=False):
         """Find indices of bins in the sample data, to go back and fetch
+
+        Arguments:
+        - sample: reference sample! np.array of dimensions (nt,...)
+        - sizemax: maximum number of indices stored for each bin
         """
 
         # Test dimensions
@@ -630,12 +652,12 @@ class ConditionalDistributionOverTime():
 
             self.cond_distributions[i_t].on.storeSamplePoints(sample=sample[i_t],sizemax=sizemax,verbose=verbose)
 
-    def computeConditionalStatsOverTime(self,sample,*args):
+    def computeConditionalStatsOverTime(self,sample,**kwargs):
         """Fills up the distribution of timeVar 
 
         Arguments:
         - sample: np.array of dimensions (nt,...)
-        - *args: see input parameters in method ConditionalDistribution.computeConditionalMeanAndVariance
+        - **kwargs: see input parameters in method ConditionalDistribution.computeConditionalMeanAndVariance
         """
 
         # Test dimensions
@@ -644,5 +666,5 @@ class ConditionalDistributionOverTime():
         # Compute all distributions over time
         for i_t in range(self.nt):
 
-            self.cond_distributions[i_t].computeConditionalMeanAndVariance(sample[i_t],*args)
+            self.cond_distributions[i_t].computeConditionalMeanAndVariance(sample[i_t],**kwargs)
         

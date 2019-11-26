@@ -393,7 +393,7 @@ class Distribution(EmptyDistribution):
 
         return sample_out
 
-    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
+    def storeSamplePoints(self,sample,sizemax=30,verbose=False):
 
         """Find indices of bins in the sample data, to go back and fetch later
         """
@@ -404,7 +404,9 @@ class Distribution(EmptyDistribution):
         if verbose:
             print("Finding bin locations...")
 
+        # print(sample.shape)
         sample = self.formatDimensions(sample)
+        # print(sample.shape)
 
         # Else initalize and find bin locations
         self.bin_locations = [[] for _ in range(self.nbins)]
@@ -448,7 +450,7 @@ class ConditionalDistribution():
     Stores conditional mean and variance in bins of a reference distribution.
     """
 
-    def __init__(self,name='',is3D=False,on=None):
+    def __init__(self,name='',is3D=False,isTime=False,on=None):
         """Contructor
         
         Arguments:
@@ -459,6 +461,7 @@ class ConditionalDistribution():
 
         self.name = name
         self.is3D = is3D
+        self.isTime = isTime
         self.on = on
         self.mean = None
         self.cond_mean = None
@@ -486,8 +489,13 @@ class ConditionalDistribution():
         sample_out = sample
         # Get dimensions and adjust output shape
         if self.is3D:
+            # collapse dimensions other than z
             if len(sshape) > 2: # reshape
-                sample_out = np.reshape(sample,(sshape[0],np.prod(sshape[1:])))
+                # if time dimension (in 2nd dimension), reorder to have z in first dim
+                if self.isTime:
+                    sample_out = np.swapaxes(sample_out,0,1)
+                    sshape = sample_out.shape
+                sample_out = np.reshape(sample_out,(sshape[0],np.prod(sshape[1:])))
             Nz,Npoints = sample_out.shape
         else:
             if len(sshape) > 1: # reshape
@@ -497,7 +505,7 @@ class ConditionalDistribution():
         
         # Test if sample size is correct to access sample points
         if Npoints != self.on.size:
-            raise WrongArgument("Error: sample size is different than that of the reference variable, so the masks might differ")
+            raise WrongArgument("ABORT: sample size is different than that of the reference variable, so the masks might differ")
 
         return Nz, sample_out
 
@@ -555,25 +563,48 @@ class DistributionOverTime():
     """Time evolution of an object of class Distribution.
     """
 
-    def __init__(self,name='',time=[],**kwargs):
+    def __init__(self,name='',time_ref=[],width=0,**kwargs):
         """Constructor of class DistributionOverTime
 
         Arguments:
         - *args: see input parameters of constructor Distribution.__init__
+        - time_ref: np.array of time values for reference dataset (in days, usually)
+        - time: np.array of time values for calculated statistics
+        - width: width of time window used to calculate statistics (same unit as time)
         """
         # for key, value in kwargs.items(): 
         #     print ("%s == %s" %(key, value))
         self.name = name
-        self.time = time
-        self.nt = len(self.time)
-        self.distributions = [Distribution(name,**kwargs) for i in range(self.nt)]
+        self.time_ref = time_ref    
+        self.nt = len(self.time_ref)
+        self.width = width
+        # time step of reference data
+        self.dt = np.diff(self.time_ref)[0]
+        # remove dn first and last points for statistics
+        self.dn = int(self.width/2./self.dt)
+        # destination time values
+        self.time = self.time_ref[self.dn:len(self.time_ref)-self.dn]
+        # initialize empty distributions
+        self.distributions = [Distribution(name,**kwargs) for i in range(self.nt-2*self.dn)]
+
+    def iterTime(self):
+
+        return range(self.nt-2*self.dn)
+
+    def iterRefTimeIndices(self):
+
+        ref_inds = range(self.dn,self.nt-self.dn)
+        it_slices = [slice(i_t-self.dn,i_t+self.dn+1) for i_t in ref_inds]
+        it_stores = [i_t-self.dn for i_t in ref_inds]
+
+        return zip(it_slices,it_stores)
 
     def testInput(self,sample):
         """Test that time dimension is matching first dimension of imput sample
         """
         sshape = sample.shape
         if sshape[0] != self.nt:
-            raise WrongArgument('ERROR: input sample does not have the correct'+\
+            raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')
 
     def computeDistributions(self,sample,*args):
@@ -588,9 +619,9 @@ class DistributionOverTime():
         self.testInput(sample)
 
         # Compute all distributions over time
-        for i_t in range(self.nt):
+        for it_slice,it_store in self.iterRefTimeIndices():
 
-            self.distributions[i_t].computeDistribution(sample[i_t],*args)
+            self.distributions[it_store].computeDistribution(sample[it_slice],*args)
 
     def storeSamplePoints(self,sample,sizemax=50,verbose=False):
         """Find indices of bins in the sample data, to go back and fetch
@@ -600,17 +631,15 @@ class DistributionOverTime():
         self.testInput(sample)
 
         # Compute bin locations if not known already
-        for i_t in range(self.nt):
-            if verbose:
-                print('-- time slice #%d'%i_t)
+        for it_slice,it_store in self.iterRefTimeIndices():
 
-            self.distributions[i_t].storeSamplePoints(sample=sample[i_t],sizemax=sizemax,verbose=verbose)
+            self.distributions[it_store].storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
 
 class ConditionalDistributionOverTime():
     """Time evolution of an object of class ConditionalDistribution.
     """
 
-    def __init__(self,name='',time=[],is3D=False,on=None):
+    def __init__(self,name='',time_ref=[],width=0,is3D=False,isTime=True,on=None):
         """Constructor of class ConditionalDistributionOverTime
 
         Arguments:
@@ -618,20 +647,39 @@ class ConditionalDistributionOverTime():
         """
 
         self.name = name
-        self.time = time
-        self.nt = len(self.time)
-        self.cond_distributions = []
+        self.time_ref = time_ref
+        self.nt = len(self.time_ref)
+        self.width = width
+        # time step of reference data
+        self.dt = np.diff(self.time_ref)[0]
+        # remove dn first and last points for statistics
+        self.dn = int(self.width/2./self.dt)
+        # destination time values
+        self.time = self.time_ref[self.dn:len(self.time_ref)-self.dn]
 
+        self.cond_distributions = []
         # Initializes all reference distributions
         for on_i in on.distributions:
-            self.cond_distributions.append(ConditionalDistribution(name,is3D=is3D,on=on_i))
+            self.cond_distributions.append(ConditionalDistribution(name,is3D=is3D,isTime=isTime,on=on_i))
+
+    def iterTime(self):
+
+        return range(self.nt-2*self.dn)
         
+    def iterRefTimeIndices(self):
+
+        ref_inds = range(self.dn,self.nt-self.dn)
+        it_slices = [slice(i_t-self.dn,i_t+self.dn+1) for i_t in ref_inds]
+        it_stores = [i_t-self.dn for i_t in ref_inds]
+
+        return zip(it_slices,it_stores)
+
     def testInput(self,sample):
         """Test that time dimension is matching first dimension of imput sample
         """
         sshape = sample.shape
         if sshape[0] != self.nt:
-            raise WrongArgument('ERROR: input sample does not have the correct'+\
+            raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')
             
     def storeSamplePoints(self,sample,sizemax=50,verbose=False):
@@ -646,11 +694,9 @@ class ConditionalDistributionOverTime():
         self.testInput(sample)
 
         # Compute bin locations if not known already
-        for i_t in range(self.nt):
-            if verbose:
-                print('-- time slice #%d'%i_t)
+        for it_slice,it_store in self.iterRefTimeIndices():
 
-            self.cond_distributions[i_t].on.storeSamplePoints(sample=sample[i_t],sizemax=sizemax,verbose=verbose)
+            self.cond_distributions[it_store].on.storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
 
     def computeConditionalStatsOverTime(self,sample,**kwargs):
         """Fills up the distribution of timeVar 
@@ -664,7 +710,7 @@ class ConditionalDistributionOverTime():
         self.testInput(sample)
 
         # Compute all distributions over time
-        for i_t in range(self.nt):
+        for it_slice,it_store in self.iterRefTimeIndices():
 
-            self.cond_distributions[i_t].computeConditionalMeanAndVariance(sample[i_t],**kwargs)
+            self.cond_distributions[it_store].computeConditionalMeanAndVariance(sample[it_slice],**kwargs)
         

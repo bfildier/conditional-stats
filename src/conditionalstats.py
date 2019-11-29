@@ -579,9 +579,13 @@ class DistributionOverTime():
         self.nt = len(self.time_ref)
         self.width = width
         # time step of reference data
-        self.dt = np.diff(self.time_ref)[0]
+        self.dt = 0
+        if self.nt > 1:
+            self.dt = np.diff(self.time_ref)[0]
         # remove dn first and last points for statistics
-        self.dn = int(self.width/2./self.dt)
+        self.dn = 0
+        if self.dt != 0:
+            self.dn = int(self.width/2./self.dt)
         # destination time values
         self.time = self.time_ref[self.dn:len(self.time_ref)-self.dn]
         # initialize empty distributions
@@ -603,6 +607,8 @@ class DistributionOverTime():
         """Test that time dimension is matching first dimension of imput sample
         """
         sshape = sample.shape
+        if self.nt == 1:
+            return
         if sshape[0] != self.nt:
             raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')
@@ -651,9 +657,13 @@ class ConditionalDistributionOverTime():
         self.nt = len(self.time_ref)
         self.width = width
         # time step of reference data
-        self.dt = np.diff(self.time_ref)[0]
+        self.dt = 0
+        if self.nt > 1:
+            self.dt = np.diff(self.time_ref)[0]
         # remove dn first and last points for statistics
-        self.dn = int(self.width/2./self.dt)
+        self.dn = 0
+        if self.dt != 0:
+            self.dn = int(self.width/2./self.dt)
         # destination time values
         self.time = self.time_ref[self.dn:len(self.time_ref)-self.dn]
 
@@ -678,6 +688,8 @@ class ConditionalDistributionOverTime():
         """Test that time dimension is matching first dimension of imput sample
         """
         sshape = sample.shape
+        if self.nt == 1:
+            return
         if sshape[0] != self.nt:
             raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')

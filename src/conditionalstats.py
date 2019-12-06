@@ -93,6 +93,7 @@ class Distribution(EmptyDistribution):
         - name: name of reference variable
         - bintype [linear, log, invlog]: bin structure,
         - nlb: number of bins used for linear statistics. Default is 50.
+        - nlr: number of ranks in linQ bintype. Default is 100.
         - nbpd: number of bins per log or invlog decade. Default is 10.
         - nppb: minimum number of data points per bin. Default is 4.
         """
@@ -493,10 +494,14 @@ class ConditionalDistribution():
             if len(sshape) > 2: # reshape
                 # if time dimension (in 2nd dimension), reorder to have z in first dim
                 if self.isTime:
+                    # nlev = sample_out.shape[0]
                     sample_out = np.swapaxes(sample_out,0,1)
                     sshape = sample_out.shape
                 sample_out = np.reshape(sample_out,(sshape[0],np.prod(sshape[1:])))
             Nz,Npoints = sample_out.shape
+            # if self.isTime:
+            #     Npoints = Npoints/nlev
+            #     print(Npoints)
         else:
             if len(sshape) > 1: # reshape
                 sample_out = np.reshape(sample,np.prod(sshape))
@@ -505,6 +510,7 @@ class ConditionalDistribution():
         
         # Test if sample size is correct to access sample points
         if Npoints != self.on.size:
+            # print(Npoints,self.on.size)
             raise WrongArgument("ABORT: sample size is different than that of the reference variable, so the masks might differ")
 
         return Nz, sample_out
@@ -639,7 +645,11 @@ class DistributionOverTime():
         # Compute bin locations if not known already
         for it_slice,it_store in self.iterRefTimeIndices():
 
+            print("%d_%d"%(it_slice.start,it_slice.stop),end=' ; ')
+
             self.distributions[it_store].storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
+
+        print()
 
 class ConditionalDistributionOverTime():
     """Time evolution of an object of class ConditionalDistribution.
@@ -708,7 +718,11 @@ class ConditionalDistributionOverTime():
         # Compute bin locations if not known already
         for it_slice,it_store in self.iterRefTimeIndices():
 
+            print("%d_%d"%(it_slice.start,it_slice.stop),end=' ; ')
+
             self.cond_distributions[it_store].on.storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
+
+        print()
 
     def computeConditionalStatsOverTime(self,sample,**kwargs):
         """Fills up the distribution of timeVar 

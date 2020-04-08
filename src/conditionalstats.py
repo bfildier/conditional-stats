@@ -445,6 +445,24 @@ class Distribution(EmptyDistribution):
         # If reach this point, everything should have worked smoothly, so:
         self.bin_locations_stored = True
 
+    def computeIndividualPercentiles(self,sample,ranks,out=False):
+        """Computes percentiles of input sample and store in object attribute"""
+
+        if isinstance(ranks,float) or isinstance(ranks,int):
+            ranks = [ranks]
+        
+        result = []
+
+        for r in ranks:
+            # calculate percentile
+            p = np.percentile(sample,r)
+            result.append(p)
+            # save
+            setattr(self,"perc%2.0f"%r,p)
+
+        if out:
+            return result
+
 class ConditionalDistribution():
     """Documentation for class ConditionalDistribution.
 
@@ -565,7 +583,7 @@ class ConditionalDistribution():
 
         self.cond_std = np.sqrt(self.cond_var)
 
-class DistributionOverTime():
+class DistributionOverTime(Distribution):
     """Time evolution of an object of class Distribution.
     """
 
@@ -651,6 +669,33 @@ class DistributionOverTime():
 
         print()
 
+    def computeIndividualPercentiles(self,sample,ranks):
+        """Computes percentiles of input sample and store timeseries in object
+        attribute. CAREFUL here only do calculation at each time, without using
+        iterRefTimeIndices method.
+        
+        Arguments:
+        - sample as above
+        - ranks: float, list or np.array"""
+
+        # Test dimensions
+        self.testInput(sample)
+
+        if isinstance(ranks,float):
+            ranks = [ranks]
+        
+        for r in ranks:
+
+            vals = np.nan*np.zeros((self.nt,))
+
+            # Compute all distributions over time
+            for it_slice,it_store in self.iterRefTimeIndices():
+
+                vals[it_store] = self.distributions[it_store].computeIndividualPercentiles(sample[it_slice],r,out=True)[0]
+
+            # save
+            setattr(self,"perc%2.0f"%r,vals)
+
 class ConditionalDistributionOverTime():
     """Time evolution of an object of class ConditionalDistribution.
     """
@@ -685,7 +730,7 @@ class ConditionalDistributionOverTime():
     def iterTime(self):
 
         return range(self.nt-2*self.dn)
-        
+
     def iterRefTimeIndices(self):
 
         ref_inds = range(self.dn,self.nt-self.dn)

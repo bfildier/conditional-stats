@@ -7,6 +7,7 @@ single variable, choosing the bin type (linear, logarithmic, inverse-logarithmic
 """
 import numpy as np
 from math import log10,ceil,floor,exp
+import time
 
 class WrongArgument(Exception):
     pass
@@ -26,8 +27,8 @@ class EmptyDistribution:
         """Constructor for class EmptyDistribution.
         Arguments:
         - bintype [linear, log, invlogQ, linQ]: bin structure.
-        - nlb: number of bins used for linear statistics. Default is 50.
-        - nbpd: number of bins per log or invlog decade. Default is 10.
+        - nlb: 'number of linear bins' used for linear statistics. Default is 50.
+        - nbpd: number of bins per (log or invlog) decade. Default is 10.
         - nppb: minimum number of data points per bin. Default is 4.
         - nlr: number of ranks in linQ bintype. Default is 100.
         - fill_last_decade: bool to fill up largest percentiles for invlog bintype
@@ -87,7 +88,7 @@ class Distribution(EmptyDistribution):
     """
 
     def __init__(self,name='',bintype='linear',nbpd=10,nppb=4,nlb=50,nlr=100,\
-        fill_last_decade=False):
+        fill_last_decade=False,distribution=None,overwrite=False):
         """Constructor for class Distribution.
         Arguments:
         - name: name of reference variable
@@ -109,6 +110,12 @@ class Distribution(EmptyDistribution):
         self.bins = None
         self.density = None
         self.bin_locations_stored = False
+        self.overwrite = overwrite
+
+        if distribution is not None: # then copy it in self
+            for attr in distribution.__dict__.keys():
+                setattr(self,attr,getattr(distribution,attr)) 
+
 
     def __str__(self):
         return super().__str__()
@@ -173,7 +180,7 @@ class Distribution(EmptyDistribution):
         self.ranks = np.linspace(0,100,self.nlr+1)
         self.nbins = self.ranks.size
 
-    def computePercentilesAndBinsFromRanks(self,sample,crop=True):
+    def computePercentilesAndBinsFromRanks(self,sample,crop=True,store=True):
 
         """Compute percentiles of the distribution and histogram bins from 
         percentile ranks. 
@@ -191,7 +198,7 @@ class Distribution(EmptyDistribution):
             centers = np.array([np.nan]*self.nbins)
         else:
             centers = np.percentile(sample_no_nan,self.ranks)
-
+        # print(centers)
         breaks = np.convolve(centers,[0.5,0.5],mode='valid')
         if crop:
             centers = centers[1:-1]
@@ -202,10 +209,14 @@ class Distribution(EmptyDistribution):
             breaks[0] = self.vmin
             breaks[1:-1] = temp
             breaks[-1] = self.vmax
+        nbins = breaks.size - 1
 
-        self.percentiles = centers
-        self.bins = breaks
-        self.nbins = self.bins.size - 1 # ()'bins' is actually bin edges)
+        if store:
+            self.percentiles = centers
+            self.bins = breaks
+            self.nbins = nbins # ()'bins' is actually bin edges)
+        else:
+            return centers, breaks, nbins
 
     def definePercentilesOnInvLogQ(self,sample):
 
@@ -330,6 +341,9 @@ class Distribution(EmptyDistribution):
         Returns:
             - ranks, percentiles, bins and probability densities"""
 
+        if not self.overwrite:
+            pass
+
         # Compute ranks, bins and percentiles
         self.ranksPercentilesAndBins(sample,vmin,vmax,minmode)
         # Compute probability density
@@ -374,7 +388,7 @@ class Distribution(EmptyDistribution):
         and formatted data.
 
         Arguments:
-        - sample: if is3D, format it in shape (Nz,Ncolumns), otherwise (Ncolumns,)
+        - sample: here we assume data is horizontal, formats it in shape (Ncolumns,)
         Controls if it matches the data used for the control distribution. If
         not, aborts.
         """
@@ -394,12 +408,12 @@ class Distribution(EmptyDistribution):
 
         return sample_out
 
-    def storeSamplePoints(self,sample,sizemax=30,verbose=False):
+    def storeSamplePoints(self,sample,sizemax=50,verbose=False,method='shuffle_mask'):
 
         """Find indices of bins in the sample data, to go back and fetch later
         """
 
-        if self.bin_locations_stored:
+        if self.bin_locations_stored and not self.overwrite:
             pass
 
         if verbose:
@@ -413,32 +427,57 @@ class Distribution(EmptyDistribution):
         self.bin_locations = [[] for _ in range(self.nbins)]
         self.bin_sample_size = [0 for _ in range(self.nbins)]
 
-        # Look at all points, in random order
-        indices = list(range(self.size))
-        np.random.shuffle(indices)
+        if method == 'random':
 
-        bins_full = []
-        for i_ind in range(len(indices)):
+            # Look at all points, in random order
+            indices = list(range(self.size))
+            np.random.shuffle(indices)
 
-            i = indices[i_ind]
+            bins_full = []
+            for i_ind in range(len(indices)):
 
-            # Find corresponding bin
-            i_bin = self.binIndex(percentile=sample[i])
+                i = indices[i_ind]
+
+                # Find corresponding bin
+                i_bin = self.binIndex(percentile=sample[i])
+
+                # Store only if bin was found
+                if i_bin is not None:
+
+                    # Keep count
+                    self.bin_sample_size[i_bin] += 1
+                    # Store only if there is still room in stored locations list
+                    if len(self.bin_locations[i_bin]) < sizemax:
+                        self.bin_locations[i_bin].append(i)
+                    elif i_bin not in bins_full:
+                        bins_full.append(i_bin)
+                        bins_full.sort()
+                        if verbose:
+                            print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
             
-            # Store only if bin was found
-            if i_bin is not None:
-                
-                # Keep count
-                self.bin_sample_size[i_bin] += 1
-                # Store only if there is still room in stored locations list
-                if len(self.bin_locations[i_bin]) < sizemax:
-                    self.bin_locations[i_bin].append(i)
-                elif i_bin not in bins_full:
-                    bins_full.append(i_bin)
-                    bins_full.sort()
-                    if verbose:
-                        print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
-        
+        elif method == 'shuffle_mask':
+
+            if verbose: print('bin #: ',end='')
+            # compute mask for each bin, randomize and store 'sizemax' first indices
+            for i_bin in range(self.nbins):
+
+                if verbose: print('%d..'%i_bin,end='')
+
+                # compute mask
+                mask = np.logical_and(sample.flatten() >= self.bins[i_bin],
+                            sample.flatten() < self.bins[i_bin+1])
+                # get all indices
+                ind_mask = np.where(mask)[0]
+                # shuffle
+                np.random.seed(int(round(time.time() * 1000)) % 1000)
+                np.random.shuffle(ind_mask)
+                # select 'sizemax' first elements
+                self.bin_locations[i_bin] = ind_mask[:sizemax]
+                self.bin_sample_size[i_bin] = min(ind_mask.size,sizemax)
+
+
+            if verbose: print()
+
         if verbose:
             print()
 
@@ -462,6 +501,60 @@ class Distribution(EmptyDistribution):
 
         if out:
             return result
+
+    def computeInvCDF(self,sample,out=False):
+        """Calculate inverse CDF on IL ranks: fraction of rain mass falling 
+        above each percentile"""
+        
+        self.invCDF = np.ones(self.nbins)*np.nan
+        sample_sum = np.nansum(sample)
+        for iQ in range(self.nbins):
+            rank = self.ranks[iQ]
+            perc = self.percentiles[iQ]
+            if not np.isnan(perc):
+                self.invCDF[iQ] = np.nansum(sample[sample>perc])/sample_sum
+
+        if out:
+            return result
+
+    def bootstrapPercentiles(self,sample,nd_resample=10,n_bootstrap=50):
+        """Perform bootstrapping to evaluate the interquartile range around each
+        percentile, for the ranks stored.
+
+        Arguments:
+        - sample: np array in Nt,Ny,Nx format
+        - nd_resample: number of time indices to randomly select for resampling
+        - n_boostrap: number of times to calculate the distribution
+        """
+
+        sshape = sample.shape
+        d_time = 0
+
+        # calculate and store distribution n_bootstrap times
+        perc_list = []
+        for i_b in range(n_bootstrap):
+
+            # select days randomly
+            indices = list(range(sshape[d_time]))
+            np.random.shuffle(indices)
+            ind_times = indices[:nd_resample]
+            resample = np.take(sample,ind_times,axis=d_time)
+
+            # calculate percentiles on resample
+            centers, bins, bins = self.computePercentilesAndBinsFromRanks(resample,
+                                            crop=False,store=False)
+
+            perc_list.append(centers)
+
+        # combine distributions into statistics and save
+        perc_array = np.vstack(perc_list)
+        self.percentiles_sigma = np.std(perc_array,axis=0)
+        self.percentiles_P5 = np.percentile(perc_array,5,axis=0)
+        self.percentiles_Q1 = np.percentile(perc_array,25,axis=0)
+        self.percentiles_Q2 = np.percentile(perc_array,50,axis=0)
+        self.percentiles_Q3 = np.percentile(perc_array,75,axis=0)
+        self.percentiles_P95 = np.percentile(perc_array,95,axis=0)
+
 
 class ConditionalDistribution():
     """Documentation for class ConditionalDistribution.
@@ -538,8 +631,8 @@ class ConditionalDistribution():
         reference variable (in bins self.on.bins).
 
         Arguments:
-        - sample: if is3D, must be in format (Nz,Ncolumns), otherwise (Ncolumns,)
-        If not, format it using method formatDimensions.
+        - sample: if is3D, should be in format (Nz,Ncolumns), otherwise (Ncolumns,)
+        If not, it is formatted using method formatDimensions.
         """
 
         # Abort if sample points for each percentile has not been computed yet
@@ -653,7 +746,7 @@ class DistributionOverTime(Distribution):
 
             self.distributions[it_store].computeDistribution(sample[it_slice],*args)
 
-    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
+    def storeSamplePoints(self,sample,sizemax=50,method='shuffle_mask',verbose=False):
         """Find indices of bins in the sample data, to go back and fetch
         """
 
@@ -665,7 +758,7 @@ class DistributionOverTime(Distribution):
 
             print("%d_%d"%(it_slice.start,it_slice.stop),end=' ; ')
 
-            self.distributions[it_store].storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
+            self.distributions[it_store].storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,method=method,verbose=verbose)
 
         print()
 
@@ -749,7 +842,7 @@ class ConditionalDistributionOverTime():
             raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')
             
-    def storeSamplePoints(self,sample,sizemax=50,verbose=False):
+    def storeSamplePoints(self,sample,sizemax=50,method='shuffle_mask',verbose=False):
         """Find indices of bins in the sample data, to go back and fetch
 
         Arguments:
@@ -765,7 +858,8 @@ class ConditionalDistributionOverTime():
 
             print("%d_%d"%(it_slice.start,it_slice.stop),end=' ; ')
 
-            self.cond_distributions[it_store].on.storeSamplePoints(sample=sample[it_slice],sizemax=sizemax,verbose=verbose)
+            self.cond_distributions[it_store].on.storeSamplePoints(sample=sample[it_slice],\
+                sizemax=sizemax,method=method,verbose=verbose)
 
         print()
 

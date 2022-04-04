@@ -1,0 +1,3 @@
+[submodule "plotting"]
+	path = plotting
+	url = git@github.com:bfildier/plotting.git

@@ -8,6 +8,7 @@ single variable, choosing the bin type (linear, logarithmic, inverse-logarithmic
 import numpy as np
 from math import log10,ceil,floor,exp
 import time
+import sys
 
 class WrongArgument(Exception):
     pass
@@ -116,6 +117,23 @@ class Distribution(EmptyDistribution):
             for attr in distribution.__dict__.keys():
                 setattr(self,attr,getattr(distribution,attr)) 
 
+    def __repr__(self):
+        """Creates a printable version of the Distribution object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< Distribution object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
 
     def __str__(self):
         return super().__str__()
@@ -349,6 +367,10 @@ class Distribution(EmptyDistribution):
         # Compute probability density
         density, _ = np.histogram(sample,bins=self.bins,density=True)
         self.density = density
+        # Number fraction of points below chosen vmin
+        self.frac_below_vmin = np.sum(sample < self.vmin)/np.size(sample)
+        # Number fraction of points above chosen vmax
+        self.frac_above_vmax = np.sum(sample > self.vmax)/np.size(sample)
 
     def indexOfRank(self,rank):
     
@@ -515,7 +537,7 @@ class Distribution(EmptyDistribution):
                 self.invCDF[iQ] = np.nansum(sample[sample>perc])/sample_sum
 
         if out:
-            return result
+            return self.invCDF
 
     def bootstrapPercentiles(self,sample,nd_resample=10,n_bootstrap=50):
         """Perform bootstrapping to evaluate the interquartile range around each
@@ -554,6 +576,22 @@ class Distribution(EmptyDistribution):
         self.percentiles_Q2 = np.percentile(perc_array,50,axis=0)
         self.percentiles_Q3 = np.percentile(perc_array,75,axis=0)
         self.percentiles_P95 = np.percentile(perc_array,95,axis=0)
+        
+    def getCDF(self):
+        """Compute the cumulative density function from the probability density,
+        as: fraction pf points below vmin + cumulative sum of density*bin_width
+        Output is the probability of x < x(bin i), same size as bins (bin edges)"""
+        
+        # array of bin widths
+        bin_width = np.diff(self.bins)
+        # CDF from density and bin width
+        cdf_base = np.cumsum(bin_width*self.density)
+        # readjust  to account for the fraction of points outside the range [vmin,vmax]
+        fmin = self.frac_below_vmin
+        fmax = self.frac_above_vmax
+        cdf = fmin + np.append(0,cdf_base*(1-fmin-fmax))
+        
+        return cdf
 
 
 class ConditionalDistribution():
@@ -578,7 +616,25 @@ class ConditionalDistribution():
         self.mean = None
         self.cond_mean = None
         self.cond_var = None
-        
+
+    def __repr__(self):
+        """Creates a printable version of the ConditionalDistribution object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< ConditionalDistribution object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
+
     def computeMean(self,sample):
         """Computes the (full) mean of the input data
         """
@@ -708,6 +764,24 @@ class DistributionOverTime(Distribution):
         # initialize empty distributions
         self.distributions = [Distribution(name,**kwargs) for i in range(self.nt-2*self.dn)]
 
+    def __repr__(self):
+        """Creates a printable version of the DistributionOverTime object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< DistributionOverTime object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
+
     def iterTime(self):
 
         return range(self.nt-2*self.dn)
@@ -730,7 +804,7 @@ class DistributionOverTime(Distribution):
             raise WrongArgument('ABORT: input sample does not have the correct'+\
             ' time dimension')
 
-    def computeDistributions(self,sample,*args):
+    def computeDistributions(self,sample,**kwargs):
         """Fills up the distribution of timeVar 
 
         Arguments:
@@ -744,7 +818,7 @@ class DistributionOverTime(Distribution):
         # Compute all distributions over time
         for it_slice,it_store in self.iterRefTimeIndices():
 
-            self.distributions[it_store].computeDistribution(sample[it_slice],*args)
+            self.distributions[it_store].computeDistribution(sample[it_slice],**kwargs)
 
     def storeSamplePoints(self,sample,sizemax=50,method='shuffle_mask',verbose=False):
         """Find indices of bins in the sample data, to go back and fetch
@@ -819,6 +893,24 @@ class ConditionalDistributionOverTime():
         # Initializes all reference distributions
         for on_i in on.distributions:
             self.cond_distributions.append(ConditionalDistribution(name,is3D=is3D,isTime=isTime,on=on_i))
+
+    def __repr__(self):
+        """Creates a printable version of the ConditionalDistributionOverTime object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< ConditionalDistributionOverTime object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
 
     def iterTime(self):
 

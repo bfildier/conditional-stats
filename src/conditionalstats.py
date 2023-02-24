@@ -20,39 +20,43 @@ class EmptyDistribution:
 
     """Documentation for class EmptyDistribution
 
-    Base object
+    Parent object. The object will not have the same types of attributes depending 
+    on the choice of distribution structure.
+    
     """
 
-    def __init__(self,bintype='linear',nbpd=10,nppb=4,nlb=50,nlr=100,fill_last_decade=False):
+    ##-- Class constructor
+    
+    def __init__(self,bintype='linear',nbpd=10,nppb=4,nbins=50,nd=4,fill_last_decade=False):
 
         """Constructor for class EmptyDistribution.
         Arguments:
         - bintype [linear, log, invlogQ, linQ]: bin structure.
-        - nlb: 'number of linear bins' used for linear statistics. Default is 50.
+        - nbins: 'number of linear bins' used for all types of statistics. Default is 50.
         - nbpd: number of bins per (log or invlog) decade. Default is 10.
         - nppb: minimum number of data points per bin. Default is 4.
-        - nlr: number of ranks in linQ bintype. Default is 100.
-        - fill_last_decade: bool to fill up largest percentiles for invlog bintype
+        - nd: (maximum) number of decades for inverse-logarithmic bins. Default is 4.
+        - fill_last_decade: boolean to fill up largest percentiles for 'invlog' bin type
         """
 
         self.bintype = bintype
-        self.nlb = nlb
+        self.nbins = nbins
         self.nbpd = nbpd
         self.nppb = nppb
-        self.nlr = nlr
+        self.nd = nd
         self.fill_last_decade = fill_last_decade
 
+        # Remove unnecessary attributes
         if self.bintype == 'linear':
 
             self.nbpd = None
             self.nppb = None
-            self.nlr = None
             self.fill_last_decade = None
 
         elif self.bintype in ['log','invlogQ']:
 
-            self.nlb = None
-            self.nlr = None
+            # self.nbins = None
+            pass
 
         elif self.bintype == 'linQ':
 
@@ -64,6 +68,27 @@ class EmptyDistribution:
         else:
 
             raise WrongArgument("ERROR: unknown bintype")
+    
+    
+    ##-- overwrite default class methods for printing 
+    
+    def __repr__(self):
+        """Creates a printable version of the Distribution object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< Distribution object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
     
     def __str__(self):
         """Override string function to print attributes
@@ -86,26 +111,30 @@ class EmptyDistribution:
 
 class Distribution(EmptyDistribution):
     """Documentation for class Distribution
+    
+    Inherited class from parent class EmptyDistribution.
     """
+    
+    ##-- Class constructor
 
-    def __init__(self,name='',bintype='linear',nbpd=10,nppb=4,nlb=50,nlr=100,\
+    def __init__(self,name='',bintype='linear',nbpd=10,nppb=4,nbins=50,nd=None,\
         fill_last_decade=False,distribution=None,overwrite=False):
         """Constructor for class Distribution.
         Arguments:
         - name: name of reference variable
         - bintype [linear, log, invlog]: bin structure,
-        - nlb: number of bins used for linear statistics. Default is 50.
-        - nlr: number of ranks in linQ bintype. Default is 100.
+        - nbins: number of bins used for all types of statistics. Default is 50.
         - nbpd: number of bins per log or invlog decade. Default is 10.
         - nppb: minimum number of data points per bin. Default is 4.
+        - nd: maximum number of decades in invlogQ bin type. Default is 4
         """
 
-        EmptyDistribution.__init__(self,bintype,nbpd,nppb,nlb,nlr,fill_last_decade)
+        EmptyDistribution.__init__(self,bintype,nbpd,nppb,nbins,nd,fill_last_decade)
         self.name = name
         self.size = 0
-        self.nbins = 0
         self.vmin = None
         self.vmax = None
+        self.rank_edges = None
         self.ranks = None
         self.percentiles = None
         self.bins = None
@@ -117,27 +146,18 @@ class Distribution(EmptyDistribution):
             for attr in distribution.__dict__.keys():
                 setattr(self,attr,getattr(distribution,attr)) 
 
+    ##-- overwrite default class methods for printing 
+    
     def __repr__(self):
         """Creates a printable version of the Distribution object. Only prints the 
         attribute value when its string fits is small enough."""
-
-        out = '< Distribution object:\n'
-        # print keys
-        for k in self.__dict__.keys():
-            out = out+' . %s: '%k
-            if sys.getsizeof(getattr(self,k).__str__()) < 80:
-                # show value
-                out = out+'%s\n'%str(getattr(self,k))
-            else:
-                # show type
-                out = out+'%s\n'%getattr(self,k).__class__
-        out = out+' >'
-
-        return out
+        return super().__repr__()
 
     def __str__(self):
         return super().__str__()
 
+    ##-- class methods
+    
     def setSampleSize(self,sample):
 
         if sample.size == 0:
@@ -178,7 +198,10 @@ class Distribution(EmptyDistribution):
             - ranks: 1D numpy.array of floats"""
 
         # k indexes bins
-        n_decades = log10(self.size/self.nppb) 		# Maximum number of decades
+        if self.nd is None:
+            n_decades = log10(self.size/self.nppb) 		# Number of decades from data size
+        else:
+            n_decades = self.nd                        # Prescribed number of decades
         dk = 1/self.nbpd
         if self.fill_last_decade:
             k_max = floor(n_decades)				 	# Maximum bin index
@@ -188,17 +211,21 @@ class Distribution(EmptyDistribution):
         ranks_invlog = np.subtract(np.ones(scale_invlog.size),
             np.power(10,-scale_invlog))*100
 
+        # store ranks
         self.ranks = ranks_invlog
-        self.nbins = self.ranks.size
-
+        # calculate bin edges in rank-space
+        self.rank_edges = np.hstack([[0],np.convolve(self.ranks,[0.5,0.5],mode='valid'),[None]])
+        # get number of bins
+        self.nbins = self.ranks.size # in this case, define nbins from - no no no no noooo, recode this
+        
     def getLinRanks(self):
 
         """Percentile ranks regularly spaced on a linear axis of percentile ranks"""
 
-        self.ranks = np.linspace(0,100,self.nlr+1)
-        self.nbins = self.ranks.size
+        self.rank_edges = np.linspace(0,100,self.nbins+1) # need nbins as input
+        self.ranks = np.convolve(self.rank_edges,[0.5,0.5],mode='valid') # center of rank 'bins'
 
-    def computePercentilesAndBinsFromRanks(self,sample,crop=True,store=True):
+    def computePercentilesAndBinsFromRanks(self,sample,crop=False,store=True,output=False):
 
         """Compute percentiles of the distribution and histogram bins from 
         percentile ranks. 
@@ -210,31 +237,27 @@ class Distribution(EmptyDistribution):
             - percentiles (or bin centers)
             - bins (edges)
         """
-
+1
         sample_no_nan = sample[np.logical_not(np.isnan(sample))]
         if sample_no_nan.size == 0:
-            centers = np.array([np.nan]*self.nbins)
+            percentiles = np.array([np.nan]*self.nbins)
         else:
-            centers = np.percentile(sample_no_nan,self.ranks)
-        # print(centers)
-        breaks = np.convolve(centers,[0.5,0.5],mode='valid')
-        if crop:
-            centers = centers[1:-1]
-            self.ranks = self.ranks[1:-1]
-        else:
-            temp = breaks.copy()
-            breaks = np.array([np.nan]*(temp.size+2))
-            breaks[0] = self.vmin
-            breaks[1:-1] = temp
-            breaks[-1] = self.vmax
-        nbins = breaks.size - 1
+            percentiles = np.percentile(sample_no_nan,self.ranks)
+            
+        # calculate center bins (not minimum edge nor maximum edge)
+        bins = np.array([np.nan]*(self.nbins+1))
+        bins[1:-1] = np.percentile(sample_no_nan,self.rank_edges[1:-1])
+
+        if not crop:
+            bins[0] = self.vmin
+            bins[-1] = self.vmax
 
         if store:
-            self.percentiles = centers
-            self.bins = breaks
-            self.nbins = nbins # ()'bins' is actually bin edges)
-        else:
-            return centers, breaks, nbins
+            self.percentiles = percentiles
+            self.bins = bins
+            
+        if output:
+            return self.percentiles, self.bins
 
     def definePercentilesOnInvLogQ(self,sample):
 
@@ -251,7 +274,7 @@ class Distribution(EmptyDistribution):
         # First compute invlog ranks including its edge values
         self.getInvLogRanks()
         # Then compute final stats
-        self.computePercentilesAndBinsFromRanks(sample)
+        self.computePercentilesAndBinsFromRanks(sample) # keep crop=False to get manually-set bounds
 
     def definePercentilesOnLinQ(self,sample,vmin=None,vmax=None):
 
@@ -268,7 +291,7 @@ class Distribution(EmptyDistribution):
         # Compute linear ranks
         self.getLinRanks()
         # Then compute final stats
-        self.computePercentilesAndBinsFromRanks(sample,crop=False)
+        self.computePercentilesAndBinsFromRanks(sample)
 
     def defineLogBins(self,sample,vmin=None,vmax=None,minmode='positive'):
 
@@ -300,9 +323,10 @@ class Distribution(EmptyDistribution):
         """
 
         self.setVminVmax(sample,vmin,vmax,minmode)
-        self.bins = np.linspace(self.vmin,self.vmax,self.nlb+1)
+        self.bins = np.linspace(self.vmin,self.vmax,self.nbins+1)
         self.percentiles = np.convolve(self.bins,[0.5,0.5],mode='valid')
-        self.nbins = self.percentiles.size
+        
+        assert(self.percentiles.size == self.nbins), "wrong number of bins: #(percentiles)=%d and #(bins)=%d"%(self.percentiles.size,self.nbins)
 
     def computePercentileRanksFromBins(self,sample):
 
@@ -315,8 +339,7 @@ class Distribution(EmptyDistribution):
         self.ranks = 100*np.array(list(map(lambda x:(sample < x).sum()/self.size, \
             self.percentiles)))
 
-    def ranksPercentilesAndBins(self,sample,vmin=None,vmax=None,minmode='positive',\
-        crop=True):
+    def ranksPercentilesAndBins(self,sample,vmin=None,vmax=None,minmode='positive'):
 
         """Preliminary step to compute probability densities. Define 
         ranks, percentiles, bins from the sample values and binning structure.
@@ -341,7 +364,7 @@ class Distribution(EmptyDistribution):
         elif self.bintype == 'invlogQ':
 
             self.getInvLogRanks()
-            self.computePercentilesAndBinsFromRanks(sample,crop=crop)
+            self.computePercentilesAndBinsFromRanks(sample)
 
         elif self.bintype == 'linQ':
 
@@ -356,7 +379,7 @@ class Distribution(EmptyDistribution):
         """Compute ranks, bins, percentiles and corresponding probability densities.
         Arguments:
             - sample: 1D numpy array of values
-        Returns:
+        Computes:
             - ranks, percentiles, bins and probability densities"""
 
         if not self.overwrite:
@@ -396,7 +419,7 @@ class Distribution(EmptyDistribution):
         if percentile is not None:
             # Find first bin edge to be above the percentile of interest
             i_perc = np.argmax(self.bins > percentile)
-            if i_perc == 0: # Then percentile is outside of stored bins
+            if i_perc == 0: # Then percentile is outside the range of stored bins
                 return None
             return i_perc-1 # Offset by 1
 
@@ -431,8 +454,8 @@ class Distribution(EmptyDistribution):
         return sample_out
 
     def storeSamplePoints(self,sample,sizemax=50,verbose=False,method='shuffle_mask'):
-
-        """Find indices of bins in the sample data, to go back and fetch later
+        """Find indices of bins in the sample data, to get a mapping or extremes 
+        and fetch locations later
         """
 
         if self.bin_locations_stored and not self.overwrite:
@@ -451,7 +474,8 @@ class Distribution(EmptyDistribution):
 
         if method == 'random':
 
-            # Look at all points, in random order
+            # Here, look at all points, in random order
+            
             indices = list(range(self.size))
             np.random.shuffle(indices)
 
@@ -495,7 +519,8 @@ class Distribution(EmptyDistribution):
                 np.random.shuffle(ind_mask)
                 # select 'sizemax' first elements
                 self.bin_locations[i_bin] = ind_mask[:sizemax]
-                self.bin_sample_size[i_bin] = min(ind_mask.size,sizemax)
+                # self.bin_sample_size[i_bin] = min(ind_mask.size,sizemax) # cap at sizemax
+                self.bin_sample_size[i_bin] = ind_mask.size # count all points there
 
 
             if verbose: print()
@@ -525,7 +550,7 @@ class Distribution(EmptyDistribution):
             return result
 
     def computeInvCDF(self,sample,out=False):
-        """Calculate inverse CDF on IL ranks: fraction of rain mass falling 
+        """Calculate 1-CDF on inverse-logarithmic ranks: fraction of rain mass falling 
         above each percentile"""
         
         self.invCDF = np.ones(self.nbins)*np.nan
@@ -563,10 +588,10 @@ class Distribution(EmptyDistribution):
             resample = np.take(sample,ind_times,axis=d_time)
 
             # calculate percentiles on resample
-            centers, bins, bins = self.computePercentilesAndBinsFromRanks(resample,
-                                            crop=False,store=False)
+            perc, bins = self.computePercentilesAndBinsFromRanks(resample,
+                                            store=False,output=True)
 
-            perc_list.append(centers)
+            perc_list.append(perc)
 
         # combine distributions into statistics and save
         perc_array = np.vstack(perc_list)
@@ -579,7 +604,7 @@ class Distribution(EmptyDistribution):
         
     def getCDF(self):
         """Compute the cumulative density function from the probability density,
-        as: fraction pf points below vmin + cumulative sum of density*bin_width
+        as: fraction of points below vmin + cumulative sum of density*bin_width
         Output is the probability of x < x(bin i), same size as bins (bin edges)"""
         
         # array of bin widths
@@ -592,6 +617,166 @@ class Distribution(EmptyDistribution):
         cdf = fmin + np.append(0,cdf_base*(1-fmin-fmax))
         
         return cdf
+
+
+class JointDistribution():
+    """Documentation for class JointDistribution
+    
+    Creates a joint distribution for two variables
+    """
+    
+    def __init__(self,name='',distribution1=None,distribution2=None,overwrite=False):
+        """Constructor for class Distribution.
+        Arguments:
+        - name: name of reference variable
+        - distribution1, distribution2: marginal distributions of two reference variables
+        - overwrite: option to overwrite stored data in object
+        """
+
+        self.name = name
+        self.distribution1 = distribution1
+        self.distribution2 = distribution2
+        self.bins1 = self.distribution1.bins
+        self.bins2 = self.distribution2.bins
+        self.density = None
+        self.bin_locations_stored = False
+        self.overwrite = overwrite
+
+        # if distribution is not None: # then copy it in self
+        #     for attr in distribution.__dict__.keys():
+        #         setattr(self,attr,getattr(distribution,attr)) 
+    
+    
+    def __repr__(self):
+        """Creates a printable version of the Distribution object. Only prints the 
+        attribute value when its string fits is small enough."""
+
+        out = '< JointDistribution object:\n'
+        # print keys
+        for k in self.__dict__.keys():
+            out = out+' . %s: '%k
+            if sys.getsizeof(getattr(self,k).__str__()) < 80:
+                # show value
+                out = out+'%s\n'%str(getattr(self,k))
+            else:
+                # show type
+                out = out+'%s\n'%getattr(self,k).__class__
+        out = out+' >'
+
+        return out
+    
+    
+    def __str__(self):
+        """Override string function to print attributes
+        """
+        # method_names = []
+        # str_out = '-- Attributes --'
+        str_out = ''
+        for a in dir(self):
+            if '__' not in a:
+                a_str = str(getattr(self,a))
+                if 'method' not in a_str:
+                    str_out = str_out+("%s : %s\n"%(a,a_str))
+        #         else:
+        #             method_names.append(a)
+        # print('-- Methods --')
+        # for m in method_names:
+        #     print(m)
+        return str_out
+    
+    def formatDimensions(self,sample):
+        """Reshape the input data, test the validity and returns the dimensions
+        and formatted data.
+    
+        Arguments:
+        - sample: here we assume data is horizontal, formats it in shape (Ncolumns,)
+        Controls if it matches the data used for the control distribution. If
+        not, aborts.
+        """
+    
+        # Get shape
+        sshape = sample.shape
+        # Initialize default output
+        sample_out = sample
+        # Get dimensions and adjust output shape
+        if len(sshape) > 1: # reshape
+            sample_out = np.reshape(sample,np.prod(sshape))
+        Npoints, = sample_out.shape
+        
+        # Test if sample size is correct to access sample points
+        if Npoints != self.size:
+            raise WrongArgument("Error: used different sample size")
+    
+        return sample_out
+
+    def storeSamplePoints(self,sample1,sample2,sizemax=50,verbose=False,method='shuffle_mask'):
+        """Find indices of bins in the sample data, to get a mapping or extremes 
+        and fetch locations later
+        """
+    
+        if self.bin_locations_stored and not self.overwrite:
+            pass
+
+        if verbose:
+            print("Finding bin locations...")
+
+        # print(sample.shape)
+        sample1 = self.formatDimensions(sample1)
+        sample2 = self.formatDimensions(sample2)
+        # print(sample.shape)
+        
+        # Else initalize and find bin locations
+        self.bin_locations = [[[] for _ in range(self.distribution2.nbins)] for _ in range(self.distribution1.nbins)]
+        self.bin_sample_size = [[0 for _ in range(self.distribution2.nbins)] for _ in range(self.distribution1.nbins)]
+
+        if method == 'shuffle_mask':
+
+            if verbose: print('bin #: ',end='')
+            # compute mask for each bin, randomize and store 'sizemax' first indices
+            for i_bin in range(self.distribution1.nbins):
+                
+                for j_bin in range(self.distribution2.nbins):
+                    
+                    if verbose: print('%d,%d..'%(i_bin,j_bin),end='')
+                    
+                    # compute mask
+                    mask1 = np.logical_and(sample1.flatten() >= self.distribution1.bins[i_bin],
+                                sample.flatten() < self.distribution1.bins[i_bin+1])
+                    mask2 = np.logical_and(sample2.flatten() >= self.distribution2.bins[j_bin],
+                                sample.flatten() < self.distribution2.bins[j_bin+1])
+                    mask = np.logical_and(mask1,mask2)
+                    # get all indices
+                    ind_mask = np.where(mask)[0]
+                    # shuffle
+                    np.random.seed(int(round(time.time() * 1000)) % 1000)
+                    np.random.shuffle(ind_mask)
+                    # select 'sizemax' first elements
+                    self.bin_locations[i_bin][j_bin] = ind_mask[:sizemax]
+                    # self.bin_sample_size[i_bin] = min(ind_mask.size,sizemax) # cap at sizemax
+                    self.bin_sample_size[i_bin][j_bin] = ind_mask.size # count all points there
+                    
+                if verbose: print()
+
+        if verbose:
+            print()
+
+        # If reach this point, everything should have worked smoothly, so:
+        self.bin_locations_stored = True
+
+    def computeDistribution(self,sample1,sample2,vmin=None,vmax=None,minmode=None):
+
+        """Compute ranks, bins, percentiles and corresponding probability densities.
+        Arguments:
+            - sample1,2: 1D numpy array of values
+        Computes:
+            - ranks, percentiles, bins and probability densities"""
+
+        if not self.overwrite:
+            pass
+
+        # Compute probability density
+        self.density, _, _ = np.histogram2d(x=sample1,y=sample2,bins=(self.bins1,self.bins2),density=True)        
+
 
 
 class ConditionalDistribution():

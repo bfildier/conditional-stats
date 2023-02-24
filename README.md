@@ -13,4 +13,7 @@ This package has several objectives:
 - implement all of the above for either a fixed dataset or over a moving time window
 
 This was developed for the investigation of precipitation extremes and other physical mechanisms in atmospheric sciences.
+To cite this code, please use the following DOI archived on Zenodo: 10.5281/zenodo.6412360.
+
+Happy coding :)
 

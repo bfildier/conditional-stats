@@ -237,7 +237,7 @@ class Distribution(EmptyDistribution):
             - percentiles (or bin centers)
             - bins (edges)
         """
-1
+
         sample_no_nan = sample[np.logical_not(np.isnan(sample))]
         if sample_no_nan.size == 0:
             percentiles = np.array([np.nan]*self.nbins)

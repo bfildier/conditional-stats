@@ -187,7 +187,7 @@ class Distribution(EmptyDistribution):
         if self.vmax is None or overwrite:
             self.vmax = vmax
 
-    def getInvLogRanks(self):
+    def getInvLogRanks(self,out=False):
 
         """Percentile ranks regularly spaced on an inverse-logarithmic axis (zoom on 
         largest percentiles of the distribution).
@@ -217,6 +217,9 @@ class Distribution(EmptyDistribution):
         self.rank_edges = np.hstack([[0],np.convolve(self.ranks,[0.5,0.5],mode='valid'),[None]])
         # get number of bins
         self.nbins = self.ranks.size # in this case, define nbins from - no no no no noooo, recode this
+        
+        if out:
+            return ranks_invlog
         
     def getLinRanks(self):
 
@@ -255,7 +258,7 @@ class Distribution(EmptyDistribution):
         if store:
             self.percentiles = percentiles
             self.bins = bins
-            
+        
         if output:
             return self.percentiles, self.bins
 
@@ -453,7 +456,93 @@ class Distribution(EmptyDistribution):
 
         return sample_out
 
-    def storeSamplePoints(self,sample,sizemax=50,verbose=False,method='shuffle_mask'):
+    def computeFraction(self,mask):
+        """BF addition July 2023. Computes number fraction of True in mask, used for subsampling the data before calculation of the distribution"""
+        
+        if np.any(mask == slice(None)):
+            
+            self.frac = 1.
+
+        else:
+            
+            self.frac = np.sum(np.array(mask,dtype=int))/mask.size
+        
+    
+    def getBinLocations(self,sample,bins,sizemax=50,verbose=False,method='shuffle_mask'):
+        """Find indices of bins in the sample data, to get a mapping of extremes 
+        and fetch locations later
+        """
+        
+        sample = self.formatDimensions(sample)
+        
+        # Initalize and find bin locations
+        nbins = len(bins)
+        bin_locations = [[] for _ in range(nbins)]
+        bin_sample_size = [0 for _ in range(nbins)]
+            
+        if method == 'shuffle_mask':
+
+            if verbose: print('bin #: ',end='')
+            # compute mask for each bin, randomize and store 'sizemax' first indices
+            for i_bin in range(nbins):
+
+                if verbose: print('%d..'%i_bin,end='')
+
+                # compute mask
+                mask = np.logical_and(sample.flatten() >= bins[i_bin],
+                            sample.flatten() < bins[i_bin+1])
+                # get all indices
+                ind_mask = np.where(mask)[0]
+                # shuffle
+                np.random.seed(int(round(time.time() * 1000)) % 1000)
+                np.random.shuffle(ind_mask)
+                
+                # save sample size in bin
+                bin_sample_size[i_bin] = ind_mask.size # count all points there
+                # select 'sizemax' first elements
+                bin_locations[i_bin] = ind_mask[:sizemax]
+
+#         elif method == 'random':
+
+#             # Here, look at all points, in random order
+            
+#             indices = list(range(self.size))
+#             np.random.shuffle(indices)
+
+#             bins_full = []
+#             for i_ind in range(len(indices)):
+
+#                 i = indices[i_ind]
+
+#                 # Find corresponding bin
+#                 i_bin = self.binIndex(percentile=sample[i])
+
+#                 # Store only if bin was found
+#                 if i_bin is not None:
+
+#                     # Keep count
+#                     self.bin_sample_size[i_bin] += 1
+#                     # Store only if there is still room in stored locations list
+#                     if len(self.bin_locations[i_bin]) < sizemax:
+#                         self.bin_locations[i_bin].append(i)
+#                     elif i_bin not in bins_full:
+#                         bins_full.append(i_bin)
+#                         bins_full.sort()
+#                         if verbose:
+#                             print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
+                            
+        else:
+            
+            raise ValueError('option "%s" is not implemented for methodgetBinLocations'%method)
+
+            if verbose: print()
+
+        if verbose:
+            print()
+            
+        return bins, bin_locations, bin_sample_size
+            
+    def storeBinLocations(self,sample,sizemax=50,verbose=False,method='shuffle_mask'):
         """Find indices of bins in the sample data, to get a mapping or extremes 
         and fetch locations later
         """
@@ -464,73 +553,46 @@ class Distribution(EmptyDistribution):
         if verbose:
             print("Finding bin locations...")
 
-        # print(sample.shape)
-        sample = self.formatDimensions(sample)
-        # print(sample.shape)
-
-        # Else initalize and find bin locations
-        self.bin_locations = [[] for _ in range(self.nbins)]
-        self.bin_sample_size = [0 for _ in range(self.nbins)]
-
-        if method == 'random':
-
-            # Here, look at all points, in random order
-            
-            indices = list(range(self.size))
-            np.random.shuffle(indices)
-
-            bins_full = []
-            for i_ind in range(len(indices)):
-
-                i = indices[i_ind]
-
-                # Find corresponding bin
-                i_bin = self.binIndex(percentile=sample[i])
-
-                # Store only if bin was found
-                if i_bin is not None:
-
-                    # Keep count
-                    self.bin_sample_size[i_bin] += 1
-                    # Store only if there is still room in stored locations list
-                    if len(self.bin_locations[i_bin]) < sizemax:
-                        self.bin_locations[i_bin].append(i)
-                    elif i_bin not in bins_full:
-                        bins_full.append(i_bin)
-                        bins_full.sort()
-                        if verbose:
-                            print("%d bins are full (%d iterations)"%(len(bins_full),i_ind))
-            
-        elif method == 'shuffle_mask':
-
-            if verbose: print('bin #: ',end='')
-            # compute mask for each bin, randomize and store 'sizemax' first indices
-            for i_bin in range(self.nbins):
-
-                if verbose: print('%d..'%i_bin,end='')
-
-                # compute mask
-                mask = np.logical_and(sample.flatten() >= self.bins[i_bin],
-                            sample.flatten() < self.bins[i_bin+1])
-                # get all indices
-                ind_mask = np.where(mask)[0]
-                # shuffle
-                np.random.seed(int(round(time.time() * 1000)) % 1000)
-                np.random.shuffle(ind_mask)
-                # select 'sizemax' first elements
-                self.bin_locations[i_bin] = ind_mask[:sizemax]
-                # self.bin_sample_size[i_bin] = min(ind_mask.size,sizemax) # cap at sizemax
-                self.bin_sample_size[i_bin] = ind_mask.size # count all points there
-
-
-            if verbose: print()
-
-        if verbose:
-            print()
-
-        # If reach this point, everything should have worked smoothly, so:
+        # compute
+        bins, bin_locations, bin_sample_size = self.getBinLocations(sample,self.bins,sizemax=sizemax,verbose=verbose,method=method)
+        
+        # store
+        self.bin_locations = bin_locations
+        self.bin_sample_size = bin_sample_size
+        
+        # mark stored
         self.bin_locations_stored = True
 
+    def storeBinLocationsGlobal(self,sample,global_bins,sizemax=50,verbose=False,method='shuffle_mask'):
+        """Find indices of bins from a global distribution from which 'sample' is just a subset"""
+        
+        if self.global_bin_locations_stored and not self.overwrite:
+            pass
+        
+        if verbose:
+            print("Finding bin locations...")
+            
+        # compute
+        global_bins, global_bin_locations, global_bin_sample_size = self.getBinLocations(sample,global_bins,sizemax=sizemax,verbose=verbose,method=method)
+        
+        # store
+        self.global_bins = global_bins
+        self.global_bin_locations = global_bin_locations
+        self.global_bin_sample_size = global_bin_sample_size
+        
+        # mark stored
+        self.global_bin_locations_stored = True
+        
+
+    def computeMean(self,sample,out=False):
+        """Compute mean of input sample"""
+        
+        result = np.mean(sample)
+        setattr(self,"mean",result)
+        
+        if out:
+            return result
+        
     def computeIndividualPercentiles(self,sample,ranks,out=False):
         """Computes percentiles of input sample and store in object attribute"""
 

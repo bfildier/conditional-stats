@@ -484,7 +484,7 @@ class Distribution(EmptyDistribution):
 
             if verbose: print('bin #: ',end='')
             # compute mask for each bin, randomize and store 'sizemax' first indices
-            for i_bin in range(nbins):
+            for i_bin in range(nbins-1):
 
                 if verbose: print('%d..'%i_bin,end='')
 
@@ -837,8 +837,125 @@ class JointDistribution():
             pass
 
         # Compute probability density
-        self.density, _, _ = np.histogram2d(x=sample1,y=sample2,bins=(self.bins1,self.bins2),density=True)        
+        self.bincount, _, _ = np.histogram2d(x=sample1.flatten(),y=sample2.flatten(),bins=(self.bins1,self.bins2),density=False)        
 
+        
+    def computeJointDensity(self, sample1, sample2, method='default'):
+        """Compute joint density. Method 'default' uses np.histogram2d, 'manual' uses np.ditigize and np.bincount."""
+        
+        if sample1.shape == sample2.shape:
+            
+            if method == 'default':
+
+                # Compute bin count
+                self.bincount, _, _ = np.histogram2d(x=sample1.flatten(),y=sample2.flatten(),bins=(self.bins1,self.bins2),density=False)
+
+                # Compute probability density
+                self.density, _, _ = np.histogram2d(x=sample1.flatten(),y=sample2.flatten(),bins=(self.bins1,self.bins2),density=True)
+
+            elif method == 'manual':
+
+                digit1 = np.digitize(sample1, self.bins1, right = True)
+                digit2 = np.digitize(sample2, self.bins2, right = True)
+                if verbose : print(digit1, digit2)
+                Ntot = sample1.size
+            
+                l1, l2 = len(self.bins1)-1, len(self.bins2)-1 # BF: adjusted nbins to match np.histogram2d
+
+                dx_1 = np.diff(self.bins1)
+                dx_2 = np.diff(self.bins2)
+
+                # initialize
+                self.bincount = np.zeros(shape = (l1, l2))
+                self.density = np.zeros(shape = (l1, l2))
+                
+                # compute
+                for i2 in range(1,l2): 
+                    
+                    idx = tuple(np.argwhere(digit2==i2).T)
+                    
+                    # bin count
+                    self.bincount[:, i2-1] = np.bincount(digit1[idx], minlength=l1+1)[1:] # BF: adjusted nbins to match np.histogram2d (removed first element of bincount)
+                    
+                    # density = bincount / Ntot / bin width
+                    self.density[:, i2-1] = self.bincount[:, i2-1]/Ntot/dx_1/dx_2[i2-1]
+    
+            
+    def computeNormalizedDensity(self, sample1, sample2, verbose = False, method='default'):
+        """Compute joint density normalized by the expected density of independent variables : N_ij * N_tot / N_i / N_j."""
+
+        if self.bincount is None:
+            
+            self.computeJointDensity(sample1, sample2, method = method)
+        
+        l1, l2 = len(self.bins1)-1, len(self.bins2)-1 # BF: adjusted nbins to match np.histogram2d
+
+        digit1 = np.digitize(sample1, self.bins1, right = True)
+        digit2 = np.digitize(sample2, self.bins2, right = True)
+        if verbose : print(digit1, digit2)
+        N1 = [np.sum(digit1==i1) for i1 in range(l1)]
+        N2 = [np.sum(digit2==i2) for i2 in range(l2)]
+        Ntot = sample1.size
+        with np.errstate(divide='ignore'):
+            Norm = Ntot / np.outer(N1, N2)
+        Norm[np.isinf(Norm)] = 1
+
+        self.norm_density = Norm * self.bincount
+        
+    def computeConditionalLocations(self, sample1, sample2, data = None):
+                                          
+        shape1 = sample1.shape
+        shape2 = sample2.shape
+            
+        digit1 = np.digitize(sample1.flatten(), self.bins1, right = True)
+        digit2 = np.digitize(sample2.flatten(), self.bins2, right = True)
+        
+        digit1_3D = np.reshape(digit1,shape1)
+        digit2_3D = np.reshape(digit2,shape2)
+        
+        return digit1_3D,digit2_3D
+        
+    def computeConditionalDataOverDensity(self, sample1, sample2, data = None):
+                                          
+        digit1 = np.digitize(sample1.flatten(), self.bins1, right = True)
+        digit2 = np.digitize(sample2.flatten(), self.bins2, right = True)
+        
+        l1, l2 = len(self.bins1)-1, len(self.bins2)-1 # BF: adjusted nbins to match np.histogram2d
+
+        if data is not None : data_over_density = np.zeros(shape=(l1,l2))
+
+        for i2 in range(1,l2): 
+            if data is not None: ## TEST AND DEBUG THIS
+                for i1 in range(l1):
+                    data_idx = tuple(np.argwhere((digit1==i1) & (digit2==i2)).T)
+                    if len(data_idx)>0 :
+                        data_over_density[i1, i2] = np.nanmean(data.flatten()[data_idx])
+                    else : data_over_density[i1, i2] = 0
+
+        if data is not None:
+            
+            return data_over_density
+        
+    def computeConditionalSum(self, sample1, sample2, data = None):
+                                          
+        digit1 = np.digitize(sample1.flatten(), self.bins1, right = True)
+        digit2 = np.digitize(sample2.flatten(), self.bins2, right = True)
+        
+        l1, l2 = len(self.bins1)-1, len(self.bins2)-1 # BF: adjusted nbins to match np.histogram2d
+
+        if data is not None : data_over_density = np.zeros(shape=(l1,l2))
+
+        for i2 in range(1,l2): 
+            if data is not None: ## TEST AND DEBUG THIS
+                for i1 in range(l1):
+                    data_idx = tuple(np.argwhere((digit1==i1) & (digit2==i2)).T)
+                    if len(data_idx)>0 :
+                        data_over_density[i1, i2] = np.nansum(data.flatten()[data_idx])
+                    else : data_over_density[i1, i2] = 0
+
+        if data is not None:
+            
+            return data_over_density
 
 
 class ConditionalDistribution():
